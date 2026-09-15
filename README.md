@@ -1,3 +1,5 @@
+Francisco Campos, nº 20260654
+
 # Baseline Predictive Pipeline -- ETAI
 
 This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
@@ -37,16 +39,14 @@ This table is updated after each practical class, so you can always see what cha
 |------|------------------------|------------------------|
 | 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
 
+### Model Comparison
+#### *Logistic Regression vs. Decision Tree*
+The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. It achieved a F1-score of 0.63. In contrast, the Decision Tree suffered from severe overfitting. It had a 0.829 accuracy in training but its performance degraded significantly on the test set 0.628 accuracy, causing the F1-score to 0.54. Regarding model bias, False Positive Rate, the Decision Tree yielded a lower FPR, of 27% for the primary "African-American" subgroup (n=303) compared to the Logistic Regression model, 33%. For the "Caucasian" subgroup (n=232), the FPR remained stable across both models at approximately 23-24%.  
+
 ## Environment setup
 
 You only need to do this once per machine.
 
-### macOS / Linux
-```bash
-python3 -m venv venv                 # creates an isolated Python environment in a folder called "venv"
-source venv/bin/activate             # activates it -- packages install here, not system-wide, and stay out of your other projects
-pip install -r requirements.txt      # installs the exact packages this project needs, into that environment
-```
 
 ### Windows -- PowerShell
 ```powershell
@@ -59,25 +59,12 @@ If PowerShell blocks the activation script, run this once first:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-### Windows -- cmd.exe
-Same three steps as above, just with cmd's own activation command:
-```cmd
-python -m venv venv
-venv\Scripts\activate.bat
-pip install -r requirements.txt
-```
-
 Once the environment is active you'll see `(venv)` at the start of your prompt. To leave it later, run `deactivate` (same command on every OS).
 
 ### Every time after the first
 
 Creating the environment and installing packages only needs to happen once, ever. Every other time you sit down to work -- a new terminal window, the next practical class, tomorrow -- you don't repeat any of the steps above. From the project's root folder, you just need to:
 
-**macOS / Linux**
-```bash
-source venv/bin/activate
-python main.py
-```
 
 **Windows**
 ```powershell
