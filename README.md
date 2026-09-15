@@ -41,7 +41,9 @@ This table is updated after each practical class, so you can always see what cha
 
 ### Model Comparison
 #### *Logistic Regression vs. Decision Tree*
-The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. It achieved a F1-score of 0.63. In contrast, the Decision Tree suffered from severe overfitting. It had a 0.829 accuracy in training but its performance degraded significantly on the test set 0.628 accuracy, causing the F1-score to 0.54. Regarding model bias, False Positive Rate, the Decision Tree yielded a lower FPR, of 27% for the primary "African-American" subgroup (n=303) compared to the Logistic Regression model, 33%. For the "Caucasian" subgroup (n=232), the FPR remained stable across both models at approximately 23-24%.  
+The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. Achieving a F1-score of 0.63. 
+In contrast, the Decision Tree had a 0.829 accuracy in training but its performance degraded on the test set to 0.628, causing the F1-score to drop to 0.54. <br>
+Therefore, the Logistic Regression model performed better then the Decesion Tree.
 
 ## Environment setup
 
