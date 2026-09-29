@@ -19,11 +19,17 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 - **Numeric Scaling**: Applied `StandardScaler` to all numeric features (selected via empirical grid search).
 - **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
 
-## Best Model
-**Logistic Regression vs. Decision Tree**
-The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. Achieving a F1-score of 0.63. 
-In contrast, the Decision Tree had a 0.829 accuracy in training but its performance degraded on the test set to 0.628, causing the F1-score to drop to 0.54. <br>
-Therefore, the Logistic Regression model performed better than the Decision Tree.
+### Model Comparison
+*(Running log of model performance across different weeks and configurations)*
+
+| Week | Model | Train Acc | Test Acc | Gap (Overfitting) | F1-Score (Weighted) | Verdict & Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **2** | Logistic Regression | 0.679 | 0.680 | -0.001 | 0.63 | Stable baseline, good generalization. **(Best Model)**[cite: 14] |
+| **2** | Decision Tree | 0.829 | 0.628 | +0.201 | 0.54 | Severe overfitting on training data; poor test performance.[cite: 14] |
+| **3** | Logistic Regression | 0.676 | 0.657 | +0.019 | 0.65 | Maintained stable generalization with the new config-driven preprocessing (Target Encoding + Standard Scaler). **(Best Model)**[cite: 19] |
+| **3** | Decision Tree | 0.792 | 0.610 | +0.182 | 0.60 | Still suffers from strong overfitting, despite the updated data cleaning.[cite: 20] |
+
+*Currently, the `logistic_regression` model  is the best model as it consistently outperforms the decision tree model in generalization.*
 
 ---
 
