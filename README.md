@@ -1,16 +1,31 @@
-Francisco Campos, nº 20260654
+# Francisco Campos, nº 20260654
 
-# Baseline Predictive Pipeline -- ETAI
+## Overview
+The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the data behind a real 2016 investigation into a risk-assessment algorithm actually used by US courts to help inform bail and sentencing decisions.
 
-This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
+## Pipeline progress
 
-The task: predict two-year recidivism using ProPublica's COMPAS
-dataset -- the data behind a real 2016 investigation into a risk-
-assessment algorithm actually used by US courts to help inform bail and sentencing decisions. See `data/README.md` for the full problem description and a complete data dictionary before you start.
+| Week | Practical class focus | Added to the pipeline |
+|------|------------------------|------------------------|
+| 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
+| 3 | Diagnostics & Preprocessing | Replaced hardcoded logic with a config-driven pipeline. Added systematic data diagnostics (invalid domain rules, placeholder token handling, exact/id duplicate checks). Tested missingness mechanisms (MCAR vs MNAR) using Cramer's V. Upgraded preprocessing to include median/most_frequent imputation, `<col>_was_missing` indicators for MNAR columns, Target Encoding for categoricals, and Standard Scaling for numerics based on an empirical grid search. Handled multicollinearity by dropping redundant columns. |
 
-It has some **deliberately weak spots**. Part of your work this
-semester is finding them and making them better -- see the pipeline progress table below, which tracks what changes and why as the weeks
-go on.
+
+## Preprocessing decisions
+- **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
+- **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
+- **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals with `median` and categoricals with `most_frequent`. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
+- **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation). 
+- **Numeric Scaling**: Applied `StandardScaler` to all numeric features (selected via empirical grid search).
+- **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
+
+## Best Model
+**Logistic Regression vs. Decision Tree**
+The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. Achieving a F1-score of 0.63. 
+In contrast, the Decision Tree had a 0.829 accuracy in training but its performance degraded on the test set to 0.628, causing the F1-score to drop to 0.54. <br>
+Therefore, the Logistic Regression model performed better than the Decision Tree.
+
+---
 
 ## Project structure
 
@@ -21,7 +36,8 @@ go on.
 ├── requirements.txt
 ├── src/
 │   ├── data.py             # loading
-│   ├── preprocessing.py    # cleaning + train/test split
+│   ├── data_diagnostics.py # MCAR/MNAR testing, validity bounds, duplicates
+│   ├── preprocessing.py    # cleaning + train/test split + ColumnTransformer
 │   ├── model.py             # model construction
 │   ├── evaluate.py         # accuracy metrics + fairness check
 │   └── results.py          # saves each run's report to disk
@@ -31,24 +47,9 @@ go on.
     └── README.md            # problem description + full data dictionary
 ```
 
-## Pipeline progress
-
-This table is updated after each practical class, so you can always see what changed in the pipeline and why -- it's a running log, not a fixed syllabus.
-
-| Week | Practical class focus | Added to the pipeline |
-|------|------------------------|------------------------|
-| 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
-
-### Model Comparison
-#### *Logistic Regression vs. Decision Tree*
-The Logistic Regression model demonstrated better generalization, maintaining a stable accuracy of 0.679 in training and 0.680 in testing. Achieving a F1-score of 0.63. 
-In contrast, the Decision Tree had a 0.829 accuracy in training but its performance degraded on the test set to 0.628, causing the F1-score to drop to 0.54. <br>
-Therefore, the Logistic Regression model performed better then the Decesion Tree.
-
 ## Environment setup
 
 You only need to do this once per machine.
-
 
 ### Windows -- PowerShell
 ```powershell
