@@ -20,16 +20,26 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 - **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
 
 ### Model Comparison
-*(Running log of model performance across different weeks and configurations)*
+
+### Model Comparison (Week 4: 5-Fold Cross-Validation)
+#### *Model Benchmark across 5-Fold Stratified Cross-Validation*
+In Week 4, we evaluated four distinct models using 5-fold stratified cross-validation on the development set, keeping the test set strictly locked. The Logistic Regression model achieved the highest validation performance with a mean validation accuracy of 0.672 and a weighted F1-score of 0.66, maintaining near-zero overfitting with a train-validation gap of only +0.003. 
+
+The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.650 in validation (a +0.083 gap) with a weighted F1-score of 0.65. The unconstrained Decision Tree continued to show clear signs of overfitting, reaching 0.696 in training but only 0.607 in validation (gap of +0.088) and a weighted F1-score of 0.61. Finally, the Dummy baseline confirmed the majority-class floor at 0.549 validation accuracy with an F1-score of 0.39, as it completely failed to recall positive recidivism cases.
+
 
 | Week | Model | Train Acc | Test Acc | Gap (Overfitting) | F1-Score (Weighted) | Verdict & Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **2** | Logistic Regression | 0.679 | 0.680 | -0.001 | 0.63 | Stable baseline, good generalization. **(Best Model)**[cite: 14] |
-| **2** | Decision Tree | 0.829 | 0.628 | +0.201 | 0.54 | Severe overfitting on training data; poor test performance.[cite: 14] |
-| **3** | Logistic Regression | 0.676 | 0.657 | +0.019 | 0.65 | Maintained stable generalization with the new config-driven preprocessing (Target Encoding + Standard Scaler). **(Best Model)**[cite: 19] |
-| **3** | Decision Tree | 0.792 | 0.610 | +0.182 | 0.60 | Still suffers from strong overfitting, despite the updated data cleaning.[cite: 20] |
+| **2** | Logistic Regression | 0.679 | 0.680 | -0.001 | 0.63 | Stable baseline, good generalization. **(Best Model)** |
+| **2** | Decision Tree | 0.829 | 0.628 | +0.201 | 0.54 | Severe overfitting on training data; poor test performance. |
+| **3** | Logistic Regression | 0.676 | 0.657 | +0.019 | 0.65 | Maintained stable generalization with the new config-driven preprocessing (Target Encoding + Standard Scaler). **(Best Model)** |
+| **3** | Decision Tree | 0.792 | 0.610 | +0.182 | 0.60 | Still suffers from strong overfitting, despite the updated data cleaning. |
+| **4** | Dummy Classifier (5-Fold CV) | 0.549 (mean) | 0.549 (mean) | -0.000 (mean) | 0.39 | Majority class baseline. Predicts only non-recidivism (0 recall on class 1). |
+| **4** | Decision Tree (5-Fold CV) | 0.696 (mean) | 0.607 (mean) | +0.088 (mean) | 0.61 | Underperformed; still suffers from clear overfitting with a high train-val gap. |
+| **4** | Random Forest (5-Fold CV) | 0.733 (mean) | 0.650 (mean) | +0.083 (mean) | 0.65 | Stronger ensemble performance, but still shows moderate overfitting on training folds. |
+| **4** | Logistic Regression (5-Fold CV) | 0.675 (mean) | 0.672 (mean) | +0.003 (mean) | 0.66 | **(Best Model)** Most robust performance across folds, highest validation accuracy, and negligible overfitting. |
 
-*Currently, the `logistic_regression` model  is the best model as it consistently outperforms the decision tree model in generalization.*
+*Currently, the `logistic_regression model` is the best model, outperforming both tree-based and dummy baselines in cross-validation performance and generalization.*
 
 ---
 
