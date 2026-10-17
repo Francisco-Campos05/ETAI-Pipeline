@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sklearn.metrics import classification_report
 from sklearn.model_selection import cross_validate
 
@@ -36,6 +37,15 @@ def cv_report(fold_scores: pd.DataFrame, scoring: str = "accuracy") -> str:
     return text
 
 
+def corrected_paired_test(scores_a, scores_b, test_train_ratio: float) -> dict:
+    diff = np.asarray(scores_a, dtype=float) - np.asarray(scores_b, dtype=float)
+    k = len(diff)
+    se = np.sqrt((1 / k + test_train_ratio) * diff.var(ddof=1))
+    t = float(diff.mean() / se) if se > 0 else 0.0
+    p_value = float(2 * stats.t.sf(abs(t), df=k - 1))
+    return {"mean_diff": float(diff.mean()), "wins": f"{int((diff > 0).sum())}/{k}", "t": t, "p_value": p_value}
+
+
 def oof_classification_report(y_true, y_pred) -> str:
     text = "Classification report (out-of-fold predictions, development set):\n" + \
         classification_report(y_true, y_pred, zero_division=0)
@@ -45,12 +55,13 @@ def oof_classification_report(y_true, y_pred) -> str:
 
 def fairness_report(y_true, y_pred, extras: pd.DataFrame, sensitive_attr: str = "race") -> str:
     df = extras.copy()
+    df[sensitive_attr] = df[sensitive_attr].astype(object).fillna("unknown")
     df["y_true"] = pd.Series(y_true).values
     df["y_pred_model"] = y_pred
     df["y_pred_compas"] = (df["score_text"] != "Low").astype(int)
 
     lines = [
-        "False positive rate by race (development set, out-of-fold)",
+        f"False positive rate by {sensitive_attr} (development set, out-of-fold)",
         "(share of people who did NOT reoffend, but were predicted to)",
         "",
     ]

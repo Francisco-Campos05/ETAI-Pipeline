@@ -24,8 +24,19 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 
 ### Model Comparison
 
-### Model Comparison (Week 4: 5-Fold Cross-Validation)
-#### *Model Benchmark across 5-Fold Stratified Cross-Validation*
+#### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 5 & 6: Tuned Ensembles & Nested CV)*
+In Week 5 & 6, hyperparameter tuning via Optuna and Nested Cross-Validation was introduced to honestely evaluate complex ensemble models without data leakage. 
+
+Tuning successfully closed the massive overfitting gap observed in Week 4. The **AdaBoost** and **Random Forest** models emerged as the top performers, maintaining the highest validation scores (~0.68) with nearly zero overfitting (gaps of +0.004 and +0.009, respectively). While the Oblique Random Forest remained slightly behind, the tuned Decision Tree successfully mitigated its previous severe overfitting, stabilizing at a +0.013 gap.
+
+| Week | Model | Optuna Tuning | Train Acc | Test Acc | Gap (Overfitting) | Verdict & Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **6** | AdaBoost | Yes (220 trees, depth 4, lr 0.025) | 0.687 | 0.682 | +0.004 | **(Best Model - Tied)** Best generalization with virtually zero overfitting. |
+| **6** | Random Forest | Yes (depth 22, min_samples 42) | 0.690 | 0.681 | +0.009 | **(Best Model - Tied)** Equivalent performance to AdaBoost, massive improvement from untuned state. |
+| **6** | Oblique Random Forest | Yes (depth 6, min_samples 3) | 0.692 | 0.679 | +0.013 | Competes closely with standard Random Forest, but no significant advantage found. |
+| **5** | Decision Tree | Yes (depth 6, min_samples 101) | 0.685 | 0.672 | +0.013 | Overfitting successfully contained compared to the untuned version (+0.088 gap in W4). |
+
+#### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 4)*
 In Week 4, we evaluated four distinct models using 5-fold stratified cross-validation on the development set, keeping the test set strictly locked. The Logistic Regression model achieved the highest validation performance with a mean validation accuracy of 0.672 and a weighted F1-score of 0.66, maintaining near-zero overfitting with a train-validation gap of only +0.003. 
 
 The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.650 in validation (a +0.083 gap) with a weighted F1-score of 0.65. The unconstrained Decision Tree continued to show clear signs of overfitting, reaching 0.696 in training but only 0.607 in validation (gap of +0.088) and a weighted F1-score of 0.61. Finally, the Dummy baseline confirmed the majority-class floor at 0.549 validation accuracy with an F1-score of 0.39, as it completely failed to recall positive recidivism cases.
@@ -42,26 +53,10 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 | **4** | Random Forest (5-Fold CV) | 0.733 (mean) | 0.650 (mean) | +0.083 (mean) | 0.65 | Stronger ensemble performance, but still shows moderate overfitting on training folds. |
 | **4** | Logistic Regression (5-Fold CV) | 0.675 (mean) | 0.672 (mean) | +0.003 (mean) | 0.66 | **(Best Model)** Most robust performance across folds, highest validation accuracy, and negligible overfitting. |
 
-*Currently, the `logistic_regression model` is the best model, outperforming both tree-based and dummy baselines in cross-validation performance and generalization.*
-
-### Model Comparison (Week 5 & 6: Tuned Ensembles & Nested CV)
-With the introduction of Optuna, models were tuned over 30 trials using **Nested Cross-Validation** (5 outer folds × 5 inner folds). This provides an honest, non-optimistic estimate of how the *tuning procedure itself* generalizes.
-
-Hyperparameter tuning successfully eliminated the overfitting issues seen in Week 4. By constraining complexity, all models now demonstrate exceptional generalization with train-validation gaps nearly reaching zero.
-
-| Model (Tuned via Optuna) | Train Acc (Nested) | Val Acc (Nested) | Gap | F1 (Weighted) | Best Found Params (Final Study) | 
-| :--- | :--- | :--- | :--- | :--- | :--- | 
-| Decision Tree | 0.685 | 0.672 | +0.013 | 0.67 | `max_depth: 6, min_samples_leaf: 101, criterion: 'gini'` | 
-| Oblique Random Forest | 0.692 | 0.679 | +0.013 | 0.67 | `tree__max_depth: 6, n_components: 5, tree__min_samples_leaf: 3` | 
-| Random Forest | 0.690 | 0.681 | +0.009 | 0.68 | `max_depth: 22, min_samples_leaf: 42, max_features: 0.5` | 
-| AdaBoost | 0.687 | **0.682** | **+0.004** | **0.68** | `max_depth: 4, n_estimators: 220, learning_rate: 0.025` | 
-
-**Verdict (Weeks 5-6):**
-**AdaBoost** and **Random Forest** are tied for the best performance. AdaBoost slightly edges out on generalization (an incredibly low gap of +0.004) and reaches 0.682 outer validation accuracy. The most notable improvement is the **Decision Tree**: the tuner aggressively restricted its depth (from unconstrained to a `max_depth` of 6 and requiring 101 samples per leaf), closing the severe +0.088 gap from Week 4 down to just +0.013.
-
-*(Note: Based on the Corrected Paired T-Test, the performance difference between AdaBoost and Random Forest is within fold-to-fold variance margin, meaning both are statistically robust and equally valid choices for production).*
+*In week 4, the `logistic_regression model` was the best model, outperforming both tree-based and dummy baselines in cross-validation performance and generalization.*
 
 ---
+<br>
 
 ## Project structure
 
@@ -86,25 +81,7 @@ Hyperparameter tuning successfully eliminated the overfitting issues seen in Wee
 
 ## Environment setup
 
-You only need to do this once per machine.
-
-### Windows -- PowerShell
-```powershell
-python -m venv venv                  # creates an isolated Python environment in a folder called "venv"
-venv\Scripts\activate                # activates it -- packages install here, not system-wide, and stay out of your other projects
-pip install -r requirements.txt      # installs the exact packages this project needs, into that environment
-```
-If PowerShell blocks the activation script, run this once first:
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-Once the environment is active you'll see `(venv)` at the start of your prompt. To leave it later, run `deactivate` (same command on every OS).
-
-### Every time after the first
-
 Creating the environment and installing packages only needs to happen once, ever. Every other time you sit down to work -- a new terminal window, the next practical class, tomorrow -- you don't repeat any of the steps above. From the project's root folder, you just need to:
-
 
 **Windows**
 ```powershell
@@ -112,7 +89,8 @@ venv\Scripts\activate
 python main.py
 ```
 
-That's it -- activate, then run. If you don't see `(venv)` at the start of your prompt, the environment isn't active and `python main.py` may use the wrong Python (or fail to find a package) entirely.
+Activate, then run. If you don't see `(venv)` at the start of your prompt, the environment isn't active and `python main.py` may use the wrong Python (or fail to find a package) entirely.
+To leave it later, run `deactivate`.
 
 ## Running the pipeline
 
