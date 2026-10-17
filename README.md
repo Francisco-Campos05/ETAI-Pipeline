@@ -9,6 +9,9 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 |------|------------------------|------------------------|
 | 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
 | 3 | Diagnostics & Preprocessing | Replaced hardcoded logic with a config-driven pipeline. Added systematic data diagnostics (invalid domain rules, placeholder token handling, exact/id duplicate checks). Tested missingness mechanisms (MCAR vs MNAR) using Cramer's V. Upgraded preprocessing to include median/most_frequent imputation, `<col>_was_missing` indicators for MNAR columns, Target Encoding for categoricals, and Standard Scaling for numerics based on an empirical grid search. Handled multicollinearity by dropping redundant columns. |
+| 4 | Evaluation & Cross-Validation | Added a locked test set (20%). Models are now evaluated using stratified 5-fold cross-validation on the development set. Out-of-fold (OOF) predictions are used for classification and fairness reports. Shifted to scikit-learn's `TargetEncoder` for safe cross-fitting. Evaluated Dummy, unconstrained Decision Tree, Random Forest, and Logistic Regression baselines. | 
+| 5 | Hyperparameter Tuning | Integrated **Optuna** for hyperparameter tuning. To estimate the tuning procedure honestly without leakage, implemented **Nested Cross-Validation** (tuning happens entirely inside the outer training folds). `build_pipeline()` now combines preprocessing and model into a single `Pipeline`. | 
+| 6 | Ensembles in depth | Added three ensemble models: `random_forest`, `oblique_random_forest` (via `SparseRandomProjection`), and `adaboost`. Included a corrected paired t-test (Nadeau & Bengio) to strictly compare models over the same CV folds and distinguish genuine wins from noise. | 
 
 
 ## Preprocessing decisions
@@ -41,26 +44,44 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 
 *Currently, the `logistic_regression model` is the best model, outperforming both tree-based and dummy baselines in cross-validation performance and generalization.*
 
+### Model Comparison (Week 5 & 6: Tuned Ensembles & Nested CV)
+With the introduction of Optuna, models were tuned over 30 trials using **Nested Cross-Validation** (5 outer folds × 5 inner folds). This provides an honest, non-optimistic estimate of how the *tuning procedure itself* generalizes.
+
+Hyperparameter tuning successfully eliminated the overfitting issues seen in Week 4. By constraining complexity, all models now demonstrate exceptional generalization with train-validation gaps nearly reaching zero.
+
+| Model (Tuned via Optuna) | Train Acc (Nested) | Val Acc (Nested) | Gap | F1 (Weighted) | Best Found Params (Final Study) | 
+| :--- | :--- | :--- | :--- | :--- | :--- | 
+| Decision Tree | 0.685 | 0.672 | +0.013 | 0.67 | `max_depth: 6, min_samples_leaf: 101, criterion: 'gini'` | 
+| Oblique Random Forest | 0.692 | 0.679 | +0.013 | 0.67 | `tree__max_depth: 6, n_components: 5, tree__min_samples_leaf: 3` | 
+| Random Forest | 0.690 | 0.681 | +0.009 | 0.68 | `max_depth: 22, min_samples_leaf: 42, max_features: 0.5` | 
+| AdaBoost | 0.687 | **0.682** | **+0.004** | **0.68** | `max_depth: 4, n_estimators: 220, learning_rate: 0.025` | 
+
+**Verdict (Weeks 5-6):**
+**AdaBoost** and **Random Forest** are tied for the best performance. AdaBoost slightly edges out on generalization (an incredibly low gap of +0.004) and reaches 0.682 outer validation accuracy. The most notable improvement is the **Decision Tree**: the tuner aggressively restricted its depth (from unconstrained to a `max_depth` of 6 and requiring 101 samples per leaf), closing the severe +0.088 gap from Week 4 down to just +0.013.
+
+*(Note: Based on the Corrected Paired T-Test, the performance difference between AdaBoost and Random Forest is within fold-to-fold variance margin, meaning both are statistically robust and equally valid choices for production).*
+
 ---
 
 ## Project structure
 
 ```
 .
-├── main.py                # entry point: run the whole pipeline
-├── config.yaml             # all tunable settings live here
+├── main.py                # entry point: run the whole pipeline
+├── config.yaml             # all tunable settings live here
 ├── requirements.txt
 ├── src/
-│   ├── data.py             # loading
-│   ├── data_diagnostics.py # MCAR/MNAR testing, validity bounds, duplicates
-│   ├── preprocessing.py    # cleaning + train/test split + ColumnTransformer
-│   ├── model.py             # model construction
-│   ├── evaluate.py         # accuracy metrics + fairness check
-│   └── results.py          # saves each run's report to disk
-├── results/                # created automatically -- one file per run (not tracked in git)
+│   ├── data.py             # loading
+│   ├── data_diagnostics.py # MCAR/MNAR testing, validity bounds, duplicates
+│   ├── preprocessing.py    # cleaning + train/test split + ColumnTransformer
+│   ├── model.py            # model construction + build_pipeline
+│   ├── evaluate.py         # accuracy metrics, paired t-test + fairness check
+│   ├── tuning.py           # Optuna tuning, nested CV and tuning reports
+│   └── results.py          # saves each run's report to disk
+├── results/                # created automatically -- one file per run (not tracked in git)
 └── data/
-    ├── compas_two_year_recidivism.csv
-    └── README.md            # problem description + full data dictionary
+    ├── compas_two_year_recidivism.csv
+    └── README.md            # problem description + full data dictionary
 ```
 
 ## Environment setup
@@ -95,25 +116,16 @@ That's it -- activate, then run. If you don't see `(venv)` at the start of your 
 
 ## Running the pipeline
 
-With the environment active (see above), from the project's root
-folder, on any OS:
+With the environment active, from the project's root folder:
 ```bash
 python main.py
 ```
 
-This loads `config.yaml`, loads and preprocesses the data, trains the model, and prints:
-- **train accuracy and test accuracy, side by side.** Comparing the two is how you catch overfitting: if the model looks much better on the data it was trained on than on data it's never seen, it has memorised rather than learned something that generalises. 
-- a classification report on the test set
+This loads `config.yaml`, loads and preprocesses the data, trains the models, tunes them via Nested CV (if enabled), and prints:
+- **Nested Cross-Validation Table:** Honest estimation of the pipeline performance across outer folds.
+- **Optimism Check & Best Hyperparameters.**
+- a classification report on the out-of-fold predictions.
 - a false-positive-rate-by-race comparison between our model and
-  COMPAS's own score
+  COMPAS's own score
 
-All of this is also saved to a timestamped file in `results/` (e.g.`results/run_20260916_143012.txt`), so it doesn't just scroll past in your terminal -- open it later, or change something in `config.yaml` (like the model type) and compare the new file to the last one.
-`results/` is created automatically the first time you run the
-pipeline, and isn't tracked in git (see `.gitignore`) since it's
-generated output, not source.
-
-You're free to improve on this structure or restructure it entirely -- what matters is that your project stays runnable end-to-end with a single command, and that each piece (data, preprocessing, model, evaluation) stays easy to find and change independently.
-
-## Dataset
-
-See `data/README.md`.
+All of this is also saved to a timestamped file in `results/`, so it doesn't just scroll past in your terminal -- open it later, or change something in `config.yaml` (like the model type) and compare the new file to the last one.
