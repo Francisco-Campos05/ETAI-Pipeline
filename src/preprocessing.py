@@ -24,12 +24,20 @@ def flag_invalid_values(df: pd.DataFrame, rules: dict) -> pd.DataFrame:
 
 def _canonicalize_categories(df: pd.DataFrame, columns_and_maps: dict, placeholder_tokens: set) -> pd.DataFrame:
     out = df.copy()
-    for col, mapping in columns_and_maps.items():
+    columns_and_maps = columns_and_maps or {}
+    # Touch both explicitly mapped columns and all object/string columns so placeholder tokens
+    # (e.g. "?" in Adult's workclass, occupation, native_country) are always converted to NaN.
+    text_cols = set(columns_and_maps.keys()) | set(out.select_dtypes(include=["object", "string"]).columns)
+    for col in text_cols:
         if col not in out.columns:
             continue
+        mapping = columns_and_maps.get(col) or {}
         cleaned = out[col].astype(str).str.strip()
-        lowered = cleaned.str.lower()
-        out[col] = lowered.map(mapping).fillna(cleaned)
+        if mapping:
+            lowered = cleaned.str.lower()
+            out[col] = lowered.map(mapping).fillna(cleaned)
+        else:
+            out[col] = cleaned
         out.loc[out[col].astype(str).str.strip().isin(placeholder_tokens), col] = np.nan
     return out
 
@@ -61,9 +69,7 @@ def drop_duplicate_rows(df: pd.DataFrame, id_column: str = None) -> pd.DataFrame
 
 
 def add_missingness_indicators(df: pd.DataFrame, mnar_indicator_sources: list) -> pd.DataFrame:
-    """Adds a `<col>_was_missing` flag for each MNAR-diagnosed column, before that
-    column gets imputed -- so a model can still see the pattern even though the fill
-    value itself (median/mode) can't carry it. Target-agnostic."""
+    """Adds a `<col>_was_missing` flag for each listed column, before it is imputed."""
     out = df.copy()
     for col in mnar_indicator_sources:
         if col in out.columns:
@@ -73,8 +79,8 @@ def add_missingness_indicators(df: pd.DataFrame, mnar_indicator_sources: list) -
 
 def split_features_target(df: pd.DataFrame, data_config: dict, mnar_indicator_sources: list):
     """
-    Returns (X, y, extras). `y` is `None` and `extras` has no target column when called
-    on label-free inference data -- nothing downstream requires the target to be present.
+    Returns (X, y, extras). `extras` holds the columns kept out of the features for auditing
+    (the sensitive attribute and COMPAS's own score). On label-free data `y` is None.
     """
     target = data_config["target"]
     sensitive_attr = data_config["sensitive_attr"]
@@ -88,6 +94,7 @@ def split_features_target(df: pd.DataFrame, data_config: dict, mnar_indicator_so
 
     always_drop = set(drop_columns) | {target, sensitive_attr}
     feature_cols = [c for c in df.columns if c not in always_drop]
+
     X = df[feature_cols]
     return X, y, extras
 
@@ -102,16 +109,15 @@ _ENCODERS = {
 
 
 def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
-    encoder_name = preprocessing_config["encoder"]
-    scaler_name = preprocessing_config["scaler"]
-    numeric_features = preprocessing_config["numeric_features"]
-    categorical_features = preprocessing_config["categorical_features"]
-    mnar_indicator_sources = preprocessing_config.get("mnar_indicator_sources", [])
+    """
+    Builds the unfitted ColumnTransformer described by `preprocessing_config`: imputation and
+    scaling for numeric columns, imputation and encoding for categorical ones, and the
+    missingness flags passed through. Every encoder tolerates unseen categories.
+    """
     imputation = preprocessing_config.get("imputation", {})
-
-    scaler_factory = _SCALERS[scaler_name]
+    scaler_factory = _SCALERS[preprocessing_config["scaler"]]
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
-    encoder = _ENCODERS[encoder_name](preprocessing_config.get("random_state"))
+    encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
     numeric_pipeline = Pipeline([
         ("impute", SimpleImputer(strategy=imputation.get("numeric_strategy", "median"))),
@@ -121,18 +127,19 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
         ("impute", SimpleImputer(strategy=imputation.get("categorical_strategy", "most_frequent"))),
         ("encode", encoder),
     ])
-
-    indicator_cols = [f"{c}_was_missing" for c in mnar_indicator_sources]
+    indicator_cols = [f"{c}_was_missing" for c in preprocessing_config.get("mnar_indicator_sources", [])]
 
     return ColumnTransformer([
-        ("numeric", numeric_pipeline, numeric_features),
-        ("categorical", categorical_pipeline, categorical_features),
+        ("numeric", numeric_pipeline, preprocessing_config["numeric_features"]),
+        ("categorical", categorical_pipeline, preprocessing_config["categorical_features"]),
         ("indicators", "passthrough", indicator_cols),
     ])
 
 
-def split_train_test(X, y, extras, test_size: float, random_state: int):
-    X_train, X_test, y_train, y_test, extras_train, extras_test = train_test_split(
-        X, y, extras, test_size=test_size, random_state=random_state, stratify=y
-    )
-    return X_train, X_test, y_train, y_test, extras_train, extras_test
+def split_dev_test(X, y, extras, test_size: float, random_state: int):
+    """
+    Stratified split into a development set, used for every decision, and a locked test set,
+    used only for the final assessment. Returns X_dev, X_test, y_dev, y_test, extras_dev,
+    extras_test, row-aligned.
+    """
+    return train_test_split(X, y, extras, test_size=test_size, random_state=random_state, stratify=y)

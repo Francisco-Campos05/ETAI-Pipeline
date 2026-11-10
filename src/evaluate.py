@@ -95,15 +95,18 @@ def fairness_report(y_true, oof_prob, extras: pd.DataFrame, sensitive_attr: str 
     df[sensitive_attr] = df[sensitive_attr].astype(object).fillna("unknown")
     df["y_true"] = pd.Series(y_true).values
     df["y_pred_model"] = (oof_prob >= threshold).astype(int)
-    df["y_pred_compas"] = (df["score_text"] != "Low").astype(int)
+
+    comparisons = [("Our model", "y_pred_model")]
+    if "score_text" in df.columns:
+        df["y_pred_compas"] = (df["score_text"] != "Low").astype(int)
+        comparisons.append(("COMPAS's own score", "y_pred_compas"))
 
     lines = [
         f"False positive rate by {sensitive_attr} (development set, out-of-fold)",
-        "(share of people who did NOT reoffend, but were predicted to)",
+        "(share of true negatives predicted as positive)",
         "",
     ]
-
-    for label, col in [("Our model", "y_pred_model"), ("COMPAS's own score", "y_pred_compas")]:
+    for label, col in comparisons:
         lines.append(f"  {label}:")
 
         for group, g in df.groupby(sensitive_attr):
