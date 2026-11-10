@@ -7,29 +7,66 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 ## Pipeline progress
 
 | Week | Practical class focus | Added to the pipeline | 
-| ----- | ----- | ----- | 
+| ------ | ------------------------ | ------------------------ | 
 | 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` | 
 | 3 | Diagnostics & Preprocessing | Replaced hardcoded logic with a config-driven pipeline. Added systematic data diagnostics (invalid domain rules, placeholder token handling, exact/id duplicate checks). Tested missingness mechanisms (MCAR vs MNAR) using Cramer's V. Upgraded preprocessing to include median/most_frequent imputation, `<col>_was_missing` indicators for MNAR columns, Target Encoding for categoricals, and Standard Scaling for numerics based on an empirical grid search. Handled multicollinearity by dropping redundant columns. | 
 | 4 | Evaluation & Cross-Validation | Added a locked test set (20%). Models are now evaluated using stratified 5-fold cross-validation on the development set. Out-of-fold (OOF) predictions are used for classification and fairness reports. Shifted to scikit-learn's `TargetEncoder` for safe cross-fitting. Evaluated Dummy, unconstrained Decision Tree, Random Forest, and Logistic Regression baselines. | 
 | 5 | Hyperparameter Tuning | Integrated **Optuna** for hyperparameter tuning. To estimate the tuning procedure honestly without leakage, implemented **Nested Cross-Validation** (tuning happens entirely inside the outer training folds). `build_pipeline()` now combines preprocessing and model into a single `Pipeline`. | 
 | 6 | Ensembles in depth | Added three ensemble models: `random_forest`, `oblique_random_forest` (via `SparseRandomProjection`), and `adaboost`. Included a corrected paired t-test (Nadeau & Bengio) to strictly compare models over the same CV folds and distinguish genuine wins from noise. | 
 | 7 | Gradient Boosting, Naive Bayes & Multi-Metric Tracking | Added three new models and their Optuna search spaces: `gradient_boosting`, `hist_gradient_boosting`, and `naive_bayes` (`GaussianNB`). Expanded evaluation (`build_scorers`) to track multiple metrics simultaneously (`accuracy`, `balanced_accuracy`, `precision`, `recall`, `f1`, `fbeta_2`, `roc_auc`, `average_precision`), shifting the primary selection metric to `roc_auc` and comparing against a `dummy` no-model floor on the exact same folds. Added `save_scores()` in `src/results.py` to log all runs to a persistent scoreboard (`results/runs.csv`). | 
+| 8 | Feature Selection & XGBoost | Integrated `xgboost` as a new model. Added a `VoteSelector` to drop noisy features, executing inside the CV folds to prevent data leakage. Added a temporary directory cache (`memory`) to dramatically speed up the nested tuning process by reusing preprocessed data blocks. | 
+| 9 | Beyond COMPAS (Option A) | Adapted the pipeline to handle a completely new dataset (Adult Income). Abstracted all hardcoded COMPAS references (like `race` or `score_text`) into config-driven parameters, ensuring true dataset-agnosticism. | 
+
+<br>
 
 ## Preprocessing decisions
+- **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
+- **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
+- **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals with `median` and categoricals with `most_frequent`. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
+- **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation). 
+- **Numeric Scaling**: Applied `StandardScaler` / `RobustScaler` to all numeric features (configurable via `config.yaml`).
+- **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
 
-* **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
+<br>
 
-* **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
+## Model Comparison
 
-* **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals with `median` and categoricals with `most_frequent`. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
+### Week 8: Does selection pay off? (XGBoost & Feature Selection)
+This week we introduced **XGBoost** alongside an embedded **VoteSelector** (which combines Random Forest, Gradient Boosting, and L1 Logistic Regression votes to drop noisy columns). To avoid the "leakage trap", selection runs strictly *inside* the CV folds.
 
-* **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation).
+| Model | Feature Selection | Untuned ROC-AUC | Tuned ROC-AUC (Nested CV) | Features Kept |
+| :--- | :--- | :--- | :--- | :--- |
+| XGBoost | Off | 0.724 | 0.727 ± 0.013 | 10 / 10 |
+| XGBoost | `min_votes 2` | 0.721 | 0.726 ± 0.013 | 2 / 10 (`age`, `priors_count`) |
 
-* **Numeric Scaling**: Applied `StandardScaler` / `RobustScaler` to all numeric features (configurable via `config.yaml`).
+**Verdict:** Selection absolutely pays off. While the honest ROC-AUC score dropped by a negligible 0.001 (from 0.727 to 0.726), the model became drastically simpler, relying on just **2 out of 10 features** (`age` and `priors_count`). Keeping feature selection enabled is highly recommended: it vastly improves model interpretability, reduces the risk of overfitting to background noise, and speeds up inference without sacrificing predictive power.
 
-* **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
+---
 
-### Model Comparison
+### Week 9: Beyond COMPAS (Option A - Adult Income)
+To test the robustness of our pipeline, we applied it to the **Adult Income** dataset to predict whether an individual earns >50K/year.
+*(To run the new configuration: `python main.py config_adult.yaml`)*
+
+#### Fixing Pipeline Assumptions (What Broke)
+| What broke | Why it broke | How it was fixed |
+| :--- | :--- | :--- |
+| **Fairness report crashed** | Hardcoded to audit `race` and compare against COMPAS's specific `score_text`. | Parameterized `sensitive_attr` via `config_adult.yaml` and added a conditional check (`if "score_text" in df.columns:`) before attempting the COMPAS comparison. |
+| **Placeholders ignored** | The Adult dataset had `?` tokens in string columns that weren't captured by the old cleanup logic. | Refactored `_canonicalize_categories` to dynamically sweep all `object`/`string` columns and explicitly replace `placeholder_tokens` with `NaN`. |
+
+#### Target Scores Achieved
+Using **XGBoost**, Optuna tuning, and the `VoteSelector` (`min_votes=1`), we successfully surpassed all target metrics on the Nested CV honest evaluation.
+
+| Metric | Target | XGBoost Tuned (Honest / Nested CV) |
+| :--- | :--- | :--- |
+| ROC-AUC | **≥ 0.90** | 0.909 ± 0.016 |
+| Accuracy | **≥ 0.855** | 0.858 ± 0.010 |
+| F1 (class 1, threshold 0.5) | **≥ 0.66** | 0.671 ± 0.037 |
+
+**Features kept (8 of 38):** `numeric__age`, `numeric__education_num`, `numeric__capital_gain`, `numeric__capital_loss`, `numeric__hours_per_week`, `categorical__marital_status`, `categorical__occupation`, `categorical__relationship`.
+
+**Conclusion:** The hardest assumption to track down was the implicit reliance on the COMPAS `score_text` variable deeply embedded within the evaluation scripts (specifically `fairness_report`). Reaching the aggressive target scores was made possible by the powerful synergy of **XGBoost** paired with the nested **VoteSelector**. Most notably, the selector successfully identified and dropped all 25 undocumented noise variables (`v01`-`v25`), leaving only 8 highly predictive demographic and financial features, which drastically boosted the model's ability to generalize on unseen data.
+
+---
 
 #### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 7: Gradient Boosting, Naive Bayes & ROC-AUC Selection)*
 
@@ -40,6 +77,8 @@ In Week 7, the pipeline was expanded to evaluate **Gradient Boosting** (`Gradien
 | **7** | Gradient Boosting | Yes (`30` trials, Nested CV) | 0.727 | 0.727 ± 0.014 | 0.500 | **(Best Model)** Strongest ranking performance (`roc_auc`); sub-sampling and shallow trees prevent overfitting. | 
 | **7** | Hist Gradient Boosting | Yes (`30` trials, Nested CV) | 0.717 | 0.727 ± 0.016 | 0.500 | Fast histogram-based boosting with `l2_regularization` and `class_weight: balanced`; closely matches standard Gradient Boosting. | 
 | **7** | Naive Bayes (`GaussianNB`) | Yes (`var_smoothing`) | 0.685 | 0.705 ± 0.012 | 0.500 | Fast probabilistic baseline; lower overall capacity compared to boosted tree ensembles due to strong independence assumptions. | 
+
+---
 
 #### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 5 & 6: Tuned Ensembles & Nested CV)*
 
@@ -53,6 +92,8 @@ Tuning successfully closed the massive overfitting gap observed in Week 4. The *
 | **6** | Random Forest | Yes (depth 22, min_samples 42) | 0.690 | 0.681 | +0.009 | **(Best Model - Tied)** Equivalent performance to AdaBoost, massive improvement from untuned state. | 
 | **6** | Oblique Random Forest | Yes (depth 6, min_samples 3) | 0.692 | 0.679 | +0.013 | Competes closely with standard Random Forest, but no significant advantage found. | 
 | **5** | Decision Tree | Yes (depth 6, min_samples 101) | 0.685 | 0.672 | +0.013 | Overfitting successfully contained compared to the untuned version (+0.088 gap in W4). | 
+
+---
 
 #### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 4)*
 
@@ -73,12 +114,15 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 
 *In week 4, the `logistic_regression model` was the best model, outperforming both tree-based and dummy baselines in cross-validation performance and generalization.*
 
+<br>
+
 ## Project structure
 
 ```
 .
 ├── main.py                # entry point: run the whole pipeline
 ├── config.yaml            # all tunable settings live here
+├── config_adult.yaml      # settings for the Adult Income dataset
 ├── requirements.txt
 ├── src/
 │   ├── data.py            # loading
@@ -88,10 +132,11 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 │   ├── tuning.py          # Optuna tuning, nested CV and tuning reports
 │   └── results.py         # saves each run's report and updates the runs.csv scoreboard
 ├── results/               # created automatically -- run reports + runs.csv (not tracked in git)
+├── results_adult/         # scoreboard and predictions specifically for the Adult Income dataset
 └── data/
     ├── compas_two_year_recidivism.csv
-    └── README.md          # problem description + full data dictionary
-
+    ├── adult_train.csv
+    └── adult_new.csv
 ```
 
 ## Environment setup
@@ -99,7 +144,6 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 Creating the environment and installing packages only needs to happen once, ever. Every other time you sit down to work -- a new terminal window, the next practical class, tomorrow -- you don't repeat any of the steps above. From the project's root folder, you just need to:
 
 **Windows**
-
 ```
 venv\Scripts\activate
 python main.py
