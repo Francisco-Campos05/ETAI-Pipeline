@@ -22,7 +22,7 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 ## Preprocessing decisions
 - **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
 - **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
-- **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals with `median` and categoricals with `most_frequent`. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
+- **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals via configurable feature-only imputers (`median` by default) and categoricals with `most_frequent`. Numeric columns are scaled prior to imputation so distance-based imputers operate on a uniform scale. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
 - **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation). 
 - **Numeric Scaling**: Applied `StandardScaler` / `RobustScaler` to all numeric features (configurable via `config.yaml`).
 - **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
