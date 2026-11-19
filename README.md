@@ -16,6 +16,7 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 | 7 | Gradient Boosting, Naive Bayes & Multi-Metric Tracking | Added three new models and their Optuna search spaces: `gradient_boosting`, `hist_gradient_boosting`, and `naive_bayes` (`GaussianNB`). Expanded evaluation (`build_scorers`) to track multiple metrics simultaneously (`accuracy`, `balanced_accuracy`, `precision`, `recall`, `f1`, `fbeta_2`, `roc_auc`, `average_precision`), shifting the primary selection metric to `roc_auc` and comparing against a `dummy` no-model floor on the exact same folds. Added `save_scores()` in `src/results.py` to log all runs to a persistent scoreboard (`results/runs.csv`). | 
 | 8 | Feature Selection & XGBoost | Integrated `xgboost` as a new model. Added a `VoteSelector` to drop noisy features, executing inside the CV folds to prevent data leakage. Added a temporary directory cache (`memory`) to dramatically speed up the nested tuning process by reusing preprocessed data blocks. | 
 | 9 | Beyond COMPAS (Option A) | Adapted the pipeline to handle a completely new dataset (Adult Income). Abstracted all hardcoded COMPAS references (like `race` or `score_text`) into config-driven parameters, ensuring true dataset-agnosticism. | 
+| 10 | Missing Values & Deployable Pipeline | Made the numeric imputer configurable via `preprocessing.imputation.numeric_strategy` (`median`, `mean`, `knn`, `iterative` MICE, and `random_forest` missForest) and reordered `build_preprocessor()` to scale numeric features **before** imputing so distance-based methods compare features on the same scale. Added model persistence (`joblib.dump` to `models/model.joblib` at the end of `main.py`) and a standalone `predict.py` CLI script to clean and score unseen label-free CSV files row-for-row without dropping duplicates. |
 
 <br>
 
@@ -30,6 +31,28 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 <br>
 
 ## Model Comparison
+
+### Missing values (Week 10)
+
+All numeric imputers in `_NUMERIC_IMPUTERS` learn exclusively from the feature columns inside each CV fold (never touching the target), preventing label leakage and ensuring identical behavior at prediction time. We benchmarked `median`, `knn` (`KNNImputer`), `iterative` (MICE via `IterativeImputer`), and `random_forest` (missForest via `IterativeImputer` + `RandomForestRegressor`) using XGBoost across the same 5 stratified folds, comparing each against `median` with Nadeau & Bengio's corrected paired t-test:
+
+| Numeric Imputer (`numeric_strategy`) | ROC-AUC (Mean ± Std) | Mean Diff vs. `median` | Folds Won | Corrected *p*-value |
+| :--- | :--- | :--- | :--- | :--- |
+| `median` (Baseline) | 0.7207 ± 0.0131 | — | — | — |
+| `knn` (`n_neighbors=5`) | 0.7207 ± 0.0156 | -0.0000 | 3/5 | 0.996 |
+| `iterative` (MICE, `max_iter=10`) | 0.7191 ± 0.0110 | -0.0017 | 2/5 | 0.731 |
+| `random_forest` (missForest, `n_estimators=50`) | 0.7203 ± 0.0152 | -0.0004 | 2/5 | 0.905 |
+
+**Verdict:** We keep **`median`** as the default imputer. None of the model-based or distance-based imputers achieved a statistically significant gain over `median` (*p* > 0.70 across all comparisons), largely because the numeric features alone carry weak mutual predictive power without the categorical context (`age_cat`) and MNAR missingness indicators already capture the target signal in `priors_count`. Consequently, `median` delivers equivalent predictive performance at a fraction of the computational cost.
+
+---
+
+## Predicting new data
+
+At the end of every run, `main.py` serializes the complete refitted `Pipeline` (scaler, imputer, encoder, feature selector, and model) to `models/model.joblib`. To generate predictions on unseen, label-free data from the terminal:
+
+```bash
+python predict.py data/compas_new_people.csv predictions.csv
 
 ### Week 8: Does selection pay off? (XGBoost & Feature Selection)
 This week we introduced **XGBoost** alongside an embedded **VoteSelector** (which combines Random Forest, Gradient Boosting, and L1 Logistic Regression votes to drop noisy columns). To avoid the "leakage trap", selection runs strictly *inside* the CV folds.
@@ -121,6 +144,7 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 ```
 .
 ├── main.py                # entry point: run the whole pipeline
+├── predict.py             # entry point: predict a new CSV with the saved model (week 10)  
 ├── config.yaml            # all tunable settings live here
 ├── config_adult.yaml      # settings for the Adult Income dataset
 ├── requirements.txt
@@ -131,10 +155,12 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 │   ├── evaluate.py        # multi-metric scorers (incl. fbeta), CV, paired t-test + fairness check
 │   ├── tuning.py          # Optuna tuning, nested CV and tuning reports
 │   └── results.py         # saves each run's report and updates the runs.csv scoreboard
+├── models/                # created automatically -- model.joblib, the final fitted pipeline (not tracked in git)
 ├── results/               # created automatically -- run reports + runs.csv (not tracked in git)
 ├── results_adult/         # scoreboard and predictions specifically for the Adult Income dataset
 └── data/
     ├── compas_two_year_recidivism.csv
+    ├── compas_new_people.csv
     ├── adult_train.csv
     └── adult_new.csv
 ```
