@@ -45,15 +45,15 @@ All numeric imputers in `_NUMERIC_IMPUTERS` learn exclusively from the feature c
 
 **Verdict:** We keep **`median`** as the default imputer. None of the model-based or distance-based imputers achieved a statistically significant gain over `median` (*p* > 0.70 across all comparisons), largely because the numeric features alone carry weak mutual predictive power without the categorical context (`age_cat`) and MNAR missingness indicators already capture the target signal in `priors_count`. Consequently, `median` delivers equivalent predictive performance at a fraction of the computational cost.
 
----
-
-## Predicting new data
+### Predicting new data
 
 At the end of every run, `main.py` serializes the complete refitted `Pipeline` (scaler, imputer, encoder, feature selector, and model) to `models/model.joblib`. To generate predictions on unseen, label-free data from the terminal:
 
 ```bash
 python predict.py data/compas_new_people.csv predictions.csv
 ```
+
+---
 
 ### Week 8: Does selection pay off? (XGBoost & Feature Selection)
 This week we introduced **XGBoost** alongside an embedded **VoteSelector** (which combines Random Forest, Gradient Boosting, and L1 Logistic Regression votes to drop noisy columns). To avoid the "leakage trap", selection runs strictly *inside* the CV folds.
@@ -92,7 +92,7 @@ Using **XGBoost**, Optuna tuning, and the `VoteSelector` (`min_votes=1`), we suc
 
 ---
 
-#### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 7: Gradient Boosting, Naive Bayes & ROC-AUC Selection)*
+### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 7: Gradient Boosting, Naive Bayes & ROC-AUC Selection)*
 
 In Week 7, the pipeline was expanded to evaluate **Gradient Boosting** (`GradientBoostingClassifier`), **Histogram-Based Gradient Boosting** (`HistGradientBoostingClassifier`), and **Gaussian Naive Bayes** (`GaussianNB`). Furthermore, model tuning and selection shifted from pure accuracy to **ROC-AUC** (`roc_auc`), accompanied by a multi-metric evaluation suite (`fbeta_2`, `average_precision`, `balanced_accuracy`) and a persistent scoreboard (`results/runs.csv`).
 
@@ -104,7 +104,7 @@ In Week 7, the pipeline was expanded to evaluate **Gradient Boosting** (`Gradien
 
 ---
 
-#### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 5 & 6: Tuned Ensembles & Nested CV)*
+### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 5 & 6: Tuned Ensembles & Nested CV)*
 
 In Week 5 & 6, hyperparameter tuning via Optuna and Nested Cross-Validation was introduced to honestly evaluate complex ensemble models without data leakage.
 
@@ -119,7 +119,7 @@ Tuning successfully closed the massive overfitting gap observed in Week 4. The *
 
 ---
 
-#### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 4)*
+### *Model Benchmark across 5-Fold Stratified Cross-Validation (Week 4)*
 
 In Week 4, we evaluated four distinct models using 5-fold stratified cross-validation on the development set, keeping the test set strictly locked. The Logistic Regression model achieved the highest validation performance with a mean validation accuracy of 0.672 and a weighted F1-score of 0.66, maintaining near-zero overfitting with a train-validation gap of only +0.003.
 
