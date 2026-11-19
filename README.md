@@ -53,6 +53,7 @@ At the end of every run, `main.py` serializes the complete refitted `Pipeline` (
 
 ```bash
 python predict.py data/compas_new_people.csv predictions.csv
+```
 
 ### Week 8: Does selection pay off? (XGBoost & Feature Selection)
 This week we introduced **XGBoost** alongside an embedded **VoteSelector** (which combines Random Forest, Gradient Boosting, and L1 Logistic Regression votes to drop noisy columns). To avoid the "leakage trap", selection runs strictly *inside* the CV folds.
