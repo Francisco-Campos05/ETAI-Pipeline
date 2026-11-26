@@ -1,4 +1,4 @@
-"""Saving each run: its scores to the runs table, and its full report to disk."""
+"""Saving each run's report to disk."""
 import os
 
 import pandas as pd
@@ -34,7 +34,8 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
         f"Model: {config['model']['type']}  params={config['model'].get('params')}\n"
         f"Preprocessing: encoder={config['preprocessing']['encoder']}  "
         f"scaler={config['preprocessing']['scaler']}  "
-        f"numeric imputer={config['preprocessing'].get('imputation', {}).get('numeric_strategy', 'median')}\n"
+        f"numeric imputer={config['preprocessing'].get('imputation', {}).get('numeric_strategy', 'median')}  "
+        f"anomaly score={(config.get('anomaly') or {}).get('method', 'none')}\n"
         f"CV: {cv['n_splits']} stratified folds  shuffle={cv.get('shuffle', True)}  "
         f"random_state={cv.get('random_state')}\n"
         f"Metrics: {cv['metrics']}  selection metric: {cv['selection_metric']}\n"
