@@ -9,3 +9,4 @@ results_adult/
 models/
 predictions.csv
 repomix-output.xml
+.vscode/settings.json

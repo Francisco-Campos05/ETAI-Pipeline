@@ -96,7 +96,7 @@ model:
 # Learned step after preprocessing: adds an `anomaly_score` column (higher = more unusual than
 # the training rows), from a detector fitted on the training rows only.
 anomaly:
-  method: "none"                                    # none | isolation_forest | lof
+  method: "lof"                                    # none | isolation_forest | lof
   n_neighbors: 20                                   # lof: larger than the largest group of identical rows
   random_state: 42                                  # isolation_forest
 
@@ -110,7 +110,7 @@ feature_selection:
     select__min_votes: {type: int, low: 1, high: 3}
 
 tuning:
-  enabled: true
+  enabled: false
   n_trials: 30
   n_splits: 5                                       # folds that score each candidate
   random_state: 42                                  # seeds the sampler and those folds

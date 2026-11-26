@@ -7,7 +7,7 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 ## Pipeline progress
 
 | Week | Practical class focus | Added to the pipeline | 
-| ------ | ------------------------ | ------------------------ | 
+| ----- | ------------------------ | ------------------------ | 
 | 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` | 
 | 3 | Diagnostics & Preprocessing | Replaced hardcoded logic with a config-driven pipeline. Added systematic data diagnostics (invalid domain rules, placeholder token handling, exact/id duplicate checks). Tested missingness mechanisms (MCAR vs MNAR) using Cramer's V. Upgraded preprocessing to include median/most_frequent imputation, `<col>_was_missing` indicators for MNAR columns, Target Encoding for categoricals, and Standard Scaling for numerics based on an empirical grid search. Handled multicollinearity by dropping redundant columns. | 
 | 4 | Evaluation & Cross-Validation | Added a locked test set (20%). Models are now evaluated using stratified 5-fold cross-validation on the development set. Out-of-fold (OOF) predictions are used for classification and fairness reports. Shifted to scikit-learn's `TargetEncoder` for safe cross-fitting. Evaluated Dummy, unconstrained Decision Tree, Random Forest, and Logistic Regression baselines. | 
@@ -16,75 +16,104 @@ The task: predict two-year recidivism using ProPublica's COMPAS dataset -- the d
 | 7 | Gradient Boosting, Naive Bayes & Multi-Metric Tracking | Added three new models and their Optuna search spaces: `gradient_boosting`, `hist_gradient_boosting`, and `naive_bayes` (`GaussianNB`). Expanded evaluation (`build_scorers`) to track multiple metrics simultaneously (`accuracy`, `balanced_accuracy`, `precision`, `recall`, `f1`, `fbeta_2`, `roc_auc`, `average_precision`), shifting the primary selection metric to `roc_auc` and comparing against a `dummy` no-model floor on the exact same folds. Added `save_scores()` in `src/results.py` to log all runs to a persistent scoreboard (`results/runs.csv`). | 
 | 8 | Feature Selection & XGBoost | Integrated `xgboost` as a new model. Added a `VoteSelector` to drop noisy features, executing inside the CV folds to prevent data leakage. Added a temporary directory cache (`memory`) to dramatically speed up the nested tuning process by reusing preprocessed data blocks. | 
 | 9 | Beyond COMPAS (Option A) | Adapted the pipeline to handle a completely new dataset (Adult Income). Abstracted all hardcoded COMPAS references (like `race` or `score_text`) into config-driven parameters, ensuring true dataset-agnosticism. | 
-| 10 | Missing Values & Deployable Pipeline | Made the numeric imputer configurable via `preprocessing.imputation.numeric_strategy` (`median`, `mean`, `knn`, `iterative` MICE, and `random_forest` missForest) and reordered `build_preprocessor()` to scale numeric features **before** imputing so distance-based methods compare features on the same scale. Added model persistence (`joblib.dump` to `models/model.joblib` at the end of `main.py`) and a standalone `predict.py` CLI script to clean and score unseen label-free CSV files row-for-row without dropping duplicates. |
+| 10 | Missing Values & Deployable Pipeline | Made the numeric imputer configurable via `preprocessing.imputation.numeric_strategy` (`median`, `mean`, `knn`, `iterative` MICE, and `random_forest` missForest) and reordered `build_preprocessor()` to scale numeric features **before** imputing so distance-based methods compare features on the same scale. Added model persistence (`joblib.dump` to `models/model.joblib` at the end of `main.py`) and a standalone `predict.py` CLI script to clean and score unseen label-free CSV files row-for-row without dropping duplicates. | 
+| 11 | Outliers and Anomaly Detection | Added `AnomalyScore` in `src/preprocessing.py` (`isolation_forest` or `lof` with `novelty=True`) fitted on the training rows of each fold to append an `anomaly_score` feature (higher = more unusual), placed after `"prep"` and before `"select"` in `build_pipeline()` when `anomaly.method` is enabled in `config.yaml`. Recorded `anomaly` in the scoreboard, printed output, and run report header, while keeping `predict.py` unchanged since the saved pipeline includes the fitted detector. | 
 
 <br>
 
 ## Preprocessing decisions
-- **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
-- **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
-- **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals via configurable feature-only imputers (`median` by default) and categoricals with `most_frequent`. Numeric columns are scaled prior to imputation so distance-based imputers operate on a uniform scale. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
-- **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation). 
-- **Numeric Scaling**: Applied `StandardScaler` / `RobustScaler` to all numeric features (configurable via `config.yaml`).
-- **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
 
-<br>
+* **Placeholder Tokens**: Replaced missing value placeholders (e.g., `-`, `?`, `n/a`, `N/A`) with `NaN` before processing to ensure correct data typing.
+
+* **Invalid Domain Values**: Applied validity bounds (e.g., `age` must be 18-100, `priors_count` max 60). Out-of-bound/impossible values were explicitly converted to `NaN`.
+
+* **Missing Values (MCAR vs MNAR)**: Instead of dropping rows, imputed numericals via configurable feature-only imputers (`median` by default) and categoricals with `most_frequent`. Numeric columns are scaled prior to imputation so distance-based imputers operate on a uniform scale. For columns diagnosed as MNAR (`priors_count`, `c_charge_degree`), added explicit `<col>_was_missing` boolean indicator columns so the model learns the missingness pattern.
+
+* **Categorical Features**: Upgraded from One-Hot Encoding to `TargetEncoder` (which won the empirical grid evaluation).
+
+* **Numeric Scaling**: Applied `StandardScaler` / `RobustScaler` to all numeric features (configurable via `config.yaml`).
+
+* **Multicollinearity/Redundancy**: Dropped `prior_offenses`, `age_in_months`, and `juvenile_total` based on VIF analysis to reduce redundancy.
 
 ## Model Comparison
+
+### Anomaly scores (Week 11)
+
+Values that break a domain rule are **invalid** and become gaps (`diagnostics.validity_rules`), whereas an **anomaly** is a row whose combination of feature values is unusual compared with the training rows, even when individual values are valid. Anomalies are real records and are never dropped; instead, `AnomalyScore` can append `anomaly_score` (higher = more unusual) inside the Pipeline:
+
+| `anomaly.method` | Score | Notes | 
+| ----- | ----- | ----- | 
+| `none` | \-- | default | 
+| `isolation_forest` | theory's `s(x)`: around `0.5` for ordinary rows, closer to `1` for anomalies | no scaling required, fast | 
+| `lof` | Local Outlier Factor: around `1` for ordinary rows, well above `1` for anomalies | distance-based, so it runs after scaling; `n_neighbors` should exceed the largest group of identical rows | 
+
+The detector is fitted on the training rows of each fold inside the Pipeline without using the target, so it runs unchanged in CV and on new data.
+
+**Comparing runs:** The scoreboard ranks runs executed on the same dataset; to evaluate the impact of a specific change (such as an imputer, an anomaly method, or feature selection), compare runs that differ only in that setting.
+
+### Does it help on COMPAS?
+
+* **Hypothesis (before running):** On COMPAS, extreme records (such as defendants with very high `priors_count` or multiple juvenile offenses) represent real repeat offenders rather than data errors. While tree-based models like XGBoost can already isolate extreme single-feature thresholds on their own, appending an explicit `anomaly_score` is unlikely to significantly boost overall ROC-AUC because recidivism is driven by main risk factors (`priors_count`, `age`) rather than rare multidimensional combinations.
+
+* **Benchmark across 5-Fold Stratified Cross-Validation (XGBoost, `tuning.enabled: false`, `min_votes: 2`):**
+
+| Anomaly Method (`anomaly.method`) | ROC-AUC (Mean ± Std) | Mean Diff vs. `none` | Folds Won | Corrected *p*-value | 
+| ----- | ----- | ----- | ----- | ----- | 
+| `none` (Baseline) | 0.7207 ± 0.0127 | — | — | — | 
+| `isolation_forest` | 0.7138 ± 0.0128 | \-0.0069 | 1/5 | 0.145 | 
+| `lof` (`n_neighbors=20`) | 0.7148 ± 0.0129 | \-0.0059 | 0/5 | 0.041 | 
+
+* **Verdict:** Our hypothesis was confirmed: adding an anomaly score does **not** help on COMPAS and actually degrades predictive performance. Both `isolation_forest` (-0.0069 mean ROC-AUC, winning only 1/5 folds) and `lof` (-0.0059 mean ROC-AUC, losing 5/5 folds with a statistically significant drop of *p* = 0.041) underperformed the baseline. Because the most unusual rows (e.g., young defendants with many juvenile offenses or sparse local density profiles) represent valid but noisy boundary cases rather than a distinct recidivism pattern, `anomaly_score` introduces uninformative variance into tree splits. We keep `anomaly.method: "none"` as the default.
+
+---
 
 ### Missing values (Week 10)
 
 All numeric imputers in `_NUMERIC_IMPUTERS` learn exclusively from the feature columns inside each CV fold (never touching the target), preventing label leakage and ensuring identical behavior at prediction time. We benchmarked `median`, `knn` (`KNNImputer`), `iterative` (MICE via `IterativeImputer`), and `random_forest` (missForest via `IterativeImputer` + `RandomForestRegressor`) using XGBoost across the same 5 stratified folds, comparing each against `median` with Nadeau & Bengio's corrected paired t-test:
 
 | Numeric Imputer (`numeric_strategy`) | ROC-AUC (Mean ± Std) | Mean Diff vs. `median` | Folds Won | Corrected *p*-value |
-| :--- | :--- | :--- | :--- | :--- |
+| ----- | ----- | ----- | ----- | ----- |
 | `median` (Baseline) | 0.7207 ± 0.0131 | — | — | — |
-| `knn` (`n_neighbors=5`) | 0.7207 ± 0.0156 | -0.0000 | 3/5 | 0.996 |
-| `iterative` (MICE, `max_iter=10`) | 0.7191 ± 0.0110 | -0.0017 | 2/5 | 0.731 |
-| `random_forest` (missForest, `n_estimators=50`) | 0.7203 ± 0.0152 | -0.0004 | 2/5 | 0.905 |
+| `knn` (`n_neighbors=5`) | 0.7207 ± 0.0156 | \-0.0000 | 3/5 | 0.996 |
+| `iterative` (MICE, `max_iter=10`) | 0.7191 ± 0.0110 | \-0.0017 | 2/5 | 0.731 |
+| `random_forest` (missForest, `n_estimators=50`) | 0.7203 ± 0.0152 | \-0.0004 | 2/5 | 0.905 |
 
 **Verdict:** We keep **`median`** as the default imputer. None of the model-based or distance-based imputers achieved a statistically significant gain over `median` (*p* > 0.70 across all comparisons), largely because the numeric features alone carry weak mutual predictive power without the categorical context (`age_cat`) and MNAR missingness indicators already capture the target signal in `priors_count`. Consequently, `median` delivers equivalent predictive performance at a fraction of the computational cost.
 
-### Predicting new data
-
-At the end of every run, `main.py` serializes the complete refitted `Pipeline` (scaler, imputer, encoder, feature selector, and model) to `models/model.joblib`. To generate predictions on unseen, label-free data from the terminal:
-
-```bash
-python predict.py data/compas_new_people.csv predictions.csv
-```
-
----
-
 ### Week 8: Does selection pay off? (XGBoost & Feature Selection)
+
 This week we introduced **XGBoost** alongside an embedded **VoteSelector** (which combines Random Forest, Gradient Boosting, and L1 Logistic Regression votes to drop noisy columns). To avoid the "leakage trap", selection runs strictly *inside* the CV folds.
 
-| Model | Feature Selection | Untuned ROC-AUC | Tuned ROC-AUC (Nested CV) | Features Kept |
-| :--- | :--- | :--- | :--- | :--- |
-| XGBoost | Off | 0.724 | 0.727 ± 0.013 | 10 / 10 |
-| XGBoost | `min_votes 2` | 0.721 | 0.726 ± 0.013 | 2 / 10 (`age`, `priors_count`) |
+| Model | Feature Selection | Untuned ROC-AUC | Tuned ROC-AUC (Nested CV) | Features Kept | 
+| ----- | ----- | ----- | ----- | ----- | 
+| XGBoost | Off | 0.724 | 0.727 ± 0.013 | 10 / 10 | 
+| XGBoost | `min_votes 2` | 0.721 | 0.726 ± 0.013 | 2 / 10 (`age`, `priors_count`) | 
 
 **Verdict:** Selection absolutely pays off. While the honest ROC-AUC score dropped by a negligible 0.001 (from 0.727 to 0.726), the model became drastically simpler, relying on just **2 out of 10 features** (`age` and `priors_count`). Keeping feature selection enabled is highly recommended: it vastly improves model interpretability, reduces the risk of overfitting to background noise, and speeds up inference without sacrificing predictive power.
 
 ---
 
 ### Week 9: Beyond COMPAS (Option A - Adult Income)
+
 To test the robustness of our pipeline, we applied it to the **Adult Income** dataset to predict whether an individual earns >50K/year.
 *(To run the new configuration: `python main.py config_adult.yaml`)*
 
 #### Fixing Pipeline Assumptions (What Broke)
-| What broke | Why it broke | How it was fixed |
-| :--- | :--- | :--- |
-| **Fairness report crashed** | Hardcoded to audit `race` and compare against COMPAS's specific `score_text`. | Parameterized `sensitive_attr` via `config_adult.yaml` and added a conditional check (`if "score_text" in df.columns:`) before attempting the COMPAS comparison. |
-| **Placeholders ignored** | The Adult dataset had `?` tokens in string columns that weren't captured by the old cleanup logic. | Refactored `_canonicalize_categories` to dynamically sweep all `object`/`string` columns and explicitly replace `placeholder_tokens` with `NaN`. |
+
+| What broke | Why it broke | How it was fixed | 
+| ----- | ----- | ----- | 
+| **Fairness report crashed** | Hardcoded to audit `race` and compare against COMPAS's specific `score_text`. | Parameterized `sensitive_attr` via `config_adult.yaml` and added a conditional check (`if "score_text" in df.columns:`) before attempting the COMPAS comparison. | 
+| **Placeholders ignored** | The Adult dataset had `?` tokens in string columns that weren't captured by the old cleanup logic. | Refactored `_canonicalize_categories` to dynamically sweep all `object`/`string` columns and explicitly replace `placeholder_tokens` with `NaN`. | 
 
 #### Target Scores Achieved
+
 Using **XGBoost**, Optuna tuning, and the `VoteSelector` (`min_votes=1`), we successfully surpassed all target metrics on the Nested CV honest evaluation.
 
-| Metric | Target | XGBoost Tuned (Honest / Nested CV) |
-| :--- | :--- | :--- |
-| ROC-AUC | **≥ 0.90** | 0.909 ± 0.016 |
-| Accuracy | **≥ 0.855** | 0.858 ± 0.010 |
-| F1 (class 1, threshold 0.5) | **≥ 0.66** | 0.671 ± 0.037 |
+| Metric | Target | XGBoost Tuned (Honest / Nested CV) | 
+| ----- | ----- | ----- | 
+| ROC-AUC | **≥ 0.90** | 0.909 ± 0.016 | 
+| Accuracy | **≥ 0.855** | 0.858 ± 0.010 | 
+| F1 (class 1, threshold 0.5) | **≥ 0.66** | 0.671 ± 0.037 | 
 
 **Features kept (8 of 38):** `numeric__age`, `numeric__education_num`, `numeric__capital_gain`, `numeric__capital_loss`, `numeric__hours_per_week`, `categorical__marital_status`, `categorical__occupation`, `categorical__relationship`.
 
@@ -108,7 +137,7 @@ In Week 7, the pipeline was expanded to evaluate **Gradient Boosting** (`Gradien
 
 In Week 5 & 6, hyperparameter tuning via Optuna and Nested Cross-Validation was introduced to honestly evaluate complex ensemble models without data leakage.
 
-Tuning successfully closed the massive overfitting gap observed in Week 4. The **AdaBoost** and **Random Forest** models emerged as the top performers, maintaining the highest validation scores (\~0.68) with nearly zero overfitting (gaps of +0.004 and +0.009, respectively). While the Oblique Random Forest remained slightly behind, the tuned Decision Tree successfully mitigated its previous severe overfitting, stabilizing at a +0.013 gap.
+Tuning successfully closed the massive overfitting gap observed in Week 4. The **AdaBoost** and **Random Forest** models emerged as the top performers, maintaining the highest validation scores (~0.68) with nearly zero overfitting (gaps of +0.004 and +0.009, respectively). While the Oblique Random Forest remained slightly behind, the tuned Decision Tree successfully mitigated its previous severe overfitting, stabilizing at a +0.013 gap.
 
 | Week | Model | Optuna Tuning | Train Acc | Test Acc | Gap (Overfitting) | Verdict & Notes | 
 | ----- | ----- | ----- | ----- | ----- | ----- | ----- | 
@@ -151,8 +180,8 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 ├── requirements.txt
 ├── src/
 │   ├── data.py            # loading
-│   ├── preprocessing.py   # cleaning, MNAR flags, train/test split + ColumnTransformer
-│   ├── model.py           # model construction (incl. ensembles & boosting) + build_pipeline
+│   ├── preprocessing.py   # cleaning, MNAR flags, train/test split + ColumnTransformer + AnomalyScore
+│   ├── model.py           # model construction (incl. ensembles & boosting) + VoteSelector + build_pipeline
 │   ├── evaluate.py        # multi-metric scorers (incl. fbeta), CV, paired t-test + fairness check
 │   ├── tuning.py          # Optuna tuning, nested CV and tuning reports
 │   └── results.py         # saves each run's report and updates the runs.csv scoreboard
@@ -171,7 +200,7 @@ The Random Forest achieved a higher training accuracy (0.733) but dropped to 0.6
 Creating the environment and installing packages only needs to happen once, ever. Every other time you sit down to work -- a new terminal window, the next practical class, tomorrow -- you don't repeat any of the steps above. From the project's root folder, you just need to:
 
 **Windows**
-```
+```powershell
 venv\Scripts\activate
 python main.py
 ```
@@ -183,7 +212,7 @@ To leave it later, run `deactivate`.
 
 With the environment active, from the project's root folder:
 
-```
+```bash
 python main.py
 ```
 
@@ -202,3 +231,13 @@ This loads `config.yaml`, loads and preprocesses the data, evaluates default hyp
 * **Persistent Scoreboard:** Ranked comparison of all runs executed on the same dataset and selection metric (`results/runs.csv`).
 
 All of this is also saved to a timestamped file in `results/` alongside the updated `results/runs.csv` scoreboard, so you can easily change something in `config.yaml` (like the model type) and compare all runs side by side.
+
+## Predicting new data
+
+At the end of every run, `main.py` serializes the complete refitted `Pipeline` (scaler, imputer, encoder, anomaly detector if enabled, feature selector, and model) to `models/model.joblib`. To generate predictions on unseen, label-free data from the terminal:
+
+```bash
+python predict.py data/compas_new_people.csv predictions.csv
+```
+
+The output has one row per input row (`id`, `probability`, and `prediction` at threshold `0.5`), cleaned with the rules in `config.yaml` and never de-duplicated (20 rows in $\rightarrow$ 20 rows out).
